@@ -1,15 +1,13 @@
 # CustomCert
 
-Hytale Early Plugin for custom certificate loading.
+Hytale Early Plugin for persistent TLS certificates and reverse proxy support.
 
-## Download
+**Documentation:** [hybuildnet.github.io/HytaleCustomCert](https://hybuildnet.github.io/HytaleCustomCert/)
 
-Download: [CustomCert.jar](https://raw.githubusercontent.com/HyBuildNet/HytaleCustomCert/main/build/latest/CustomCert.jar)
-
-## Documentation
-
-See [EXPLAIN.md](EXPLAIN.md) for details.
+**Download:** [CustomCert.jar](https://raw.githubusercontent.com/HyBuildNet/HytaleCustomCert/main/build/latest/CustomCert.jar)
 
 ## License
 
 [MIT](LICENSE)
+
+This project bundles [Javassist](https://www.javassist.org/) (Apache 2.0 / MPL).

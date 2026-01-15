@@ -5,6 +5,13 @@ out/
 lib/HytaleServer.jar
 lib/HytaleServer/
 
+# Node
+node_modules/
+
+# VitePress
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+
 # IDE
 .idea/
 *.iml
