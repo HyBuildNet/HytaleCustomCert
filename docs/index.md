@@ -27,6 +27,8 @@ Hytale uses QUIC with client certificates. The server generates a new self-signe
 - Saves auto-generated certificates for reuse
 - Optionally bypasses client certificate binding validation
 
+Can be used with any QUIC-compatible reverse proxy, such as [quic-relay](https://github.com/HyBuildNet/quic-relay).
+
 ## Building from source
 
 Requires `lib/HytaleServer.jar` (not distributed).
