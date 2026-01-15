@@ -45,11 +45,9 @@ public class CertificatePatchTransformer implements ClassTransformer {
             createDefaultConfig(configFile);
         }
 
-        try {
-            System.out.println("[CustomCert] Loading config from " + configFile.getAbsolutePath());
-            FileReader reader = new FileReader(configFile);
+        System.out.println("[CustomCert] Loading config from " + configFile.getAbsolutePath());
+        try (FileReader reader = new FileReader(configFile)) {
             com.google.gson.JsonObject json = com.google.gson.JsonParser.parseReader(reader).getAsJsonObject();
-            reader.close();
 
             if (json.has("privateKeyPath")) {
                 privateKeyPath = json.get("privateKeyPath").getAsString();
@@ -77,7 +75,6 @@ public class CertificatePatchTransformer implements ClassTransformer {
 
     private void createDefaultConfig(File configFile) {
         try {
-            // Ensure parent directory exists
             if (configFile.getParentFile() != null && !configFile.getParentFile().exists()) {
                 configFile.getParentFile().mkdirs();
             }
@@ -91,9 +88,9 @@ public class CertificatePatchTransformer implements ClassTransformer {
             json.add("experimental", experimental);
 
             com.google.gson.Gson gson = new com.google.gson.GsonBuilder().setPrettyPrinting().create();
-            FileWriter writer = new FileWriter(configFile);
-            gson.toJson(json, writer);
-            writer.close();
+            try (FileWriter writer = new FileWriter(configFile)) {
+                gson.toJson(json, writer);
+            }
 
             System.out.println("[CustomCert] Created default config at " + configFile.getAbsolutePath());
 
@@ -160,8 +157,8 @@ public class CertificatePatchTransformer implements ClassTransformer {
             @Override
             public void edit(NewExpr e) throws CannotCompileException {
                 if (e.getClassName().equals("io.netty.handler.ssl.util.SelfSignedCertificate")) {
-                    System.out.println("[CustomCert] Replacing SelfSignedCertificate instantiation");
-                    e.replace("{ $_ = $proceed($$); }");
+                    System.out.println("[CustomCert] Skipping SelfSignedCertificate instantiation");
+                    e.replace("{ $_ = null; }");
                 }
             }
 
@@ -180,8 +177,8 @@ public class CertificatePatchTransformer implements ClassTransformer {
                             m.replace("{ $_ = " + QUIC_TRANSPORT + ".customCertificate; }");
                         }
                     }
-                } catch (Exception e) {
-                    // Skip method calls that can't be analyzed
+                } catch (Exception ex) {
+                    System.err.println("[CustomCert] Warning: Could not analyze method call: " + ex.getMessage());
                 }
             }
         });
@@ -208,52 +205,49 @@ public class CertificatePatchTransformer implements ClassTransformer {
     /**
      * Builds the code that loads or generates certificates.
      * Uses java.io.File instead of java.nio.file to avoid Javassist varargs issues.
+     * Uses try-finally for proper resource cleanup.
      */
     private String buildCertificateLoadingCode() {
-        // Escape paths for Java string literals
         String escapedKeyPath = privateKeyPath.replace("\\", "\\\\").replace("\"", "\\\"");
         String escapedCertPath = publicKeyPath.replace("\\", "\\\\").replace("\"", "\\\"");
 
         StringBuilder code = new StringBuilder();
 
         code.append("{");
-
-        // Define files using configured paths
         code.append("  java.io.File keyFile = new java.io.File(\"").append(escapedKeyPath).append("\");");
         code.append("  java.io.File certFile = new java.io.File(\"").append(escapedCertPath).append("\");");
 
         code.append("  try {");
-
-        // Check if certificate files exist
         code.append("    if (keyFile.exists() && certFile.exists()) {");
         code.append("      System.out.println(\"[CustomCert] Loading certificates:\");");
         code.append("      System.out.println(\"[CustomCert]   Private key: \" + keyFile.getAbsolutePath());");
         code.append("      System.out.println(\"[CustomCert]   Public cert: \" + certFile.getAbsolutePath());");
 
-        // Load private key with BouncyCastle
-        code.append("      java.io.FileReader keyReader = new java.io.FileReader(keyFile);");
-        code.append("      org.bouncycastle.openssl.PEMParser keyParser = ");
-        code.append("        new org.bouncycastle.openssl.PEMParser(keyReader);");
-        code.append("      Object keyObj = keyParser.readObject();");
-        code.append("      keyParser.close();");
-        code.append("      org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter keyConv = ");
-        code.append("        new org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter();");
-        code.append("      if (keyObj instanceof org.bouncycastle.openssl.PEMKeyPair) {");
-        code.append("        com.hypixel.hytale.server.core.io.transport.QUICTransport.customPrivateKey = keyConv.getPrivateKey(");
-        code.append("          ((org.bouncycastle.openssl.PEMKeyPair)keyObj).getPrivateKeyInfo());");
-        code.append("      } else {");
-        code.append("        com.hypixel.hytale.server.core.io.transport.QUICTransport.customPrivateKey = keyConv.getPrivateKey(");
-        code.append("          (org.bouncycastle.asn1.pkcs.PrivateKeyInfo)keyObj);");
-        code.append("      }");
+        // Load private key with try-finally
+        code.append("      org.bouncycastle.openssl.PEMParser keyParser = null;");
+        code.append("      try {");
+        code.append("        keyParser = new org.bouncycastle.openssl.PEMParser(new java.io.FileReader(keyFile));");
+        code.append("        Object keyObj = keyParser.readObject();");
+        code.append("        org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter keyConv = ");
+        code.append("          new org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter();");
+        code.append("        if (keyObj instanceof org.bouncycastle.openssl.PEMKeyPair) {");
+        code.append("          com.hypixel.hytale.server.core.io.transport.QUICTransport.customPrivateKey = keyConv.getPrivateKey(");
+        code.append("            ((org.bouncycastle.openssl.PEMKeyPair)keyObj).getPrivateKeyInfo());");
+        code.append("        } else {");
+        code.append("          com.hypixel.hytale.server.core.io.transport.QUICTransport.customPrivateKey = keyConv.getPrivateKey(");
+        code.append("            (org.bouncycastle.asn1.pkcs.PrivateKeyInfo)keyObj);");
+        code.append("        }");
+        code.append("      } finally { if (keyParser != null) keyParser.close(); }");
 
-        // Load certificate with BouncyCastle
-        code.append("      java.io.FileReader certReader = new java.io.FileReader(certFile);");
-        code.append("      org.bouncycastle.openssl.PEMParser certParser = ");
-        code.append("        new org.bouncycastle.openssl.PEMParser(certReader);");
-        code.append("      Object certObj = certParser.readObject();");
-        code.append("      certParser.close();");
-        code.append("      com.hypixel.hytale.server.core.io.transport.QUICTransport.customCertificate = new org.bouncycastle.cert.jcajce.JcaX509CertificateConverter()");
-        code.append("        .getCertificate((org.bouncycastle.cert.X509CertificateHolder)certObj);");
+        // Load certificate with try-finally
+        code.append("      org.bouncycastle.openssl.PEMParser certParser = null;");
+        code.append("      try {");
+        code.append("        certParser = new org.bouncycastle.openssl.PEMParser(new java.io.FileReader(certFile));");
+        code.append("        Object certObj = certParser.readObject();");
+        code.append("        com.hypixel.hytale.server.core.io.transport.QUICTransport.customCertificate = ");
+        code.append("          new org.bouncycastle.cert.jcajce.JcaX509CertificateConverter()");
+        code.append("            .getCertificate((org.bouncycastle.cert.X509CertificateHolder)certObj);");
+        code.append("      } finally { if (certParser != null) certParser.close(); }");
 
         code.append("      System.out.println(\"[CustomCert] Loaded certificate: \" + ");
         code.append("        com.hypixel.hytale.server.core.io.transport.QUICTransport.customCertificate.getSubjectX500Principal().getName());");
@@ -267,7 +261,7 @@ public class CertificatePatchTransformer implements ClassTransformer {
         code.append("      com.hypixel.hytale.server.core.io.transport.QUICTransport.customPrivateKey = ssc.key();");
         code.append("      com.hypixel.hytale.server.core.io.transport.QUICTransport.customCertificate = ssc.cert();");
 
-        // Create parent directories if needed
+        // Create parent directories
         code.append("      if (keyFile.getParentFile() != null && !keyFile.getParentFile().exists()) {");
         code.append("        keyFile.getParentFile().mkdirs();");
         code.append("      }");
@@ -275,19 +269,19 @@ public class CertificatePatchTransformer implements ClassTransformer {
         code.append("        certFile.getParentFile().mkdirs();");
         code.append("      }");
 
-        // Save private key with BouncyCastle
-        code.append("      java.io.FileWriter keyFileWriter = new java.io.FileWriter(keyFile);");
-        code.append("      org.bouncycastle.openssl.jcajce.JcaPEMWriter keyWriter = ");
-        code.append("        new org.bouncycastle.openssl.jcajce.JcaPEMWriter(keyFileWriter);");
-        code.append("      keyWriter.writeObject(com.hypixel.hytale.server.core.io.transport.QUICTransport.customPrivateKey);");
-        code.append("      keyWriter.close();");
+        // Save private key with try-finally
+        code.append("      org.bouncycastle.openssl.jcajce.JcaPEMWriter keyWriter = null;");
+        code.append("      try {");
+        code.append("        keyWriter = new org.bouncycastle.openssl.jcajce.JcaPEMWriter(new java.io.FileWriter(keyFile));");
+        code.append("        keyWriter.writeObject(com.hypixel.hytale.server.core.io.transport.QUICTransport.customPrivateKey);");
+        code.append("      } finally { if (keyWriter != null) keyWriter.close(); }");
 
-        // Save certificate with BouncyCastle
-        code.append("      java.io.FileWriter certFileWriter = new java.io.FileWriter(certFile);");
-        code.append("      org.bouncycastle.openssl.jcajce.JcaPEMWriter certWriter = ");
-        code.append("        new org.bouncycastle.openssl.jcajce.JcaPEMWriter(certFileWriter);");
-        code.append("      certWriter.writeObject(com.hypixel.hytale.server.core.io.transport.QUICTransport.customCertificate);");
-        code.append("      certWriter.close();");
+        // Save certificate with try-finally
+        code.append("      org.bouncycastle.openssl.jcajce.JcaPEMWriter certWriter = null;");
+        code.append("      try {");
+        code.append("        certWriter = new org.bouncycastle.openssl.jcajce.JcaPEMWriter(new java.io.FileWriter(certFile));");
+        code.append("        certWriter.writeObject(com.hypixel.hytale.server.core.io.transport.QUICTransport.customCertificate);");
+        code.append("      } finally { if (certWriter != null) certWriter.close(); }");
 
         code.append("      System.out.println(\"[CustomCert] Saved certificates:\");");
         code.append("      System.out.println(\"[CustomCert]   Private key: \" + keyFile.getAbsolutePath());");
