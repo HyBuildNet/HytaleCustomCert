@@ -1,6 +1,8 @@
 # CustomCert
 
-Hytale Early Plugin that enables persistent TLS certificates and reverse proxy support.
+Hytale Plugin for custom/persistent TLS certificates (+ reverse proxy support). It uses Hytales special `Early Plugins` to modify the certificate-loading process before the actual server boots up.
+
+The plugin works with both 'Online' and 'Offline' mode. In order to put your server behind a reverse proxy you have to set `bypassClientCertificateBinding` to `true`. This will prevent the server from checking the client certificate (which in a reverse-proxy scenario has a different key than the Hytale installation on your computer) - otherwise the connection will fail. Make sure that the server and the proxy use the same certificate.
 
 ## Download
 
