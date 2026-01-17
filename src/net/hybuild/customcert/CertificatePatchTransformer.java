@@ -150,9 +150,12 @@ public class CertificatePatchTransformer implements ClassTransformer {
 
         // Get constructor and inject certificate loading
         CtConstructor constructor = ctClass.getDeclaredConstructor(new CtClass[]{});
-        constructor.insertBefore(buildCertificateLoadingCode());
 
-        // Replace SelfSignedCertificate.key() and .cert() calls
+        // IMPORTANT: First instrument to replace the original SelfSignedCertificate calls,
+        // THEN insert our loading code. This way our injected code's SelfSignedCertificate
+        // calls won't be affected by the ExprEditor.
+
+        // Replace SelfSignedCertificate.key() and .cert() calls in ORIGINAL code
         constructor.instrument(new ExprEditor() {
             @Override
             public void edit(NewExpr e) throws CannotCompileException {
@@ -182,6 +185,10 @@ public class CertificatePatchTransformer implements ClassTransformer {
                 }
             }
         });
+
+        // NOW insert our certificate loading code (after instrumentation, so our
+        // SelfSignedCertificate calls in fallback won't be replaced)
+        constructor.insertBefore(buildCertificateLoadingCode());
 
         byte[] result = ctClass.toBytecode();
         ctClass.detach();
@@ -244,9 +251,19 @@ public class CertificatePatchTransformer implements ClassTransformer {
         code.append("      try {");
         code.append("        certParser = new org.bouncycastle.openssl.PEMParser(new java.io.FileReader(certFile));");
         code.append("        Object certObj = certParser.readObject();");
+        code.append("        System.out.println(\"[CustomCert] Parsed certificate object: \" + (certObj != null ? certObj.getClass().getName() : \"null\"));");
+        code.append("        if (certObj == null) { throw new RuntimeException(\"Failed to parse certificate file - PEM parser returned null\"); }");
+        code.append("        if (!(certObj instanceof org.bouncycastle.cert.X509CertificateHolder)) {");
+        code.append("          throw new RuntimeException(\"Unexpected certificate type: \" + certObj.getClass().getName());");
+        code.append("        }");
+        code.append("        org.bouncycastle.cert.X509CertificateHolder certHolder = (org.bouncycastle.cert.X509CertificateHolder) certObj;");
         code.append("        com.hypixel.hytale.server.core.io.transport.QUICTransport.customCertificate = ");
         code.append("          new org.bouncycastle.cert.jcajce.JcaX509CertificateConverter()");
-        code.append("            .getCertificate((org.bouncycastle.cert.X509CertificateHolder)certObj);");
+        code.append("            .setProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider())");
+        code.append("            .getCertificate(certHolder);");
+        code.append("        if (com.hypixel.hytale.server.core.io.transport.QUICTransport.customCertificate == null) {");
+        code.append("          throw new RuntimeException(\"Certificate conversion returned null\");");
+        code.append("        }");
         code.append("      } finally { if (certParser != null) certParser.close(); }");
 
         code.append("      System.out.println(\"[CustomCert] Loaded certificate: \" + ");
