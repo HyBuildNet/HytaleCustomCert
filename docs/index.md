@@ -33,8 +33,10 @@ Can be used with any QUIC-compatible reverse proxy, such as [quic-relay](https:/
 
 Requires `lib/HytaleServer.jar` (not distributed).
 
+### Using Gradle
+
 ```bash
-./build.sh
+./gradlew build
 ```
 
 Output: `build/latest/CustomCert.jar`
