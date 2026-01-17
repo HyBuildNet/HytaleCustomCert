@@ -1,9 +1,12 @@
 name: Build and Release
 
 on:
-  push:
-    tags:
-      - '*'
+  workflow_dispatch:
+    inputs:
+      server_version:
+        description: 'Hytale Server version (tag from hytale-protocol)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -29,7 +32,7 @@ jobs:
       - name: Download HytaleServer.jar
         run: |
           curl -L -o lib/HytaleServer.jar \
-            "https://github.com/soksx/hytale-protocol/releases/download/jar-${{ github.ref_name }}/HytaleServer.jar"
+            "https://github.com/soksx/hytale-protocol/releases/download/jar-${{ inputs.server_version }}/HytaleServer.jar"
 
       - name: Build with Gradle
         run: ./gradlew build
@@ -37,5 +40,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.server_version }}
+          name: Release ${{ inputs.server_version }}
           files: build/latest/CustomCert.jar
           generate_release_notes: true
